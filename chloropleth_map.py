@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import os
 import glob
 import matplotlib as mpl
+from ipywidgets import interact, Dropdown, fixed
 
 # Step 1: Load U.S. State Boundaries from Natural Earth Shapefile
 def load_us_states(shapefile_path):
@@ -14,7 +15,7 @@ def load_us_states(shapefile_path):
     return us_states
 
 # Step 2: Load and Combine Traffic Stop Data for All States
-def load_traffic_stop_data(folder_path):
+def load_traffic_stop_data(file_path, age=None, sex=None, race=None):
     # Initialize an empty DataFrame to store all states' data
 
     state_abbr_to_name = {
@@ -32,40 +33,39 @@ def load_traffic_stop_data(folder_path):
     }
 
     # Initialize an empty DataFrame to store all states' data
-    all_data = pd.DataFrame(columns=['name', 'stop_count'])
+    traffic_data = pd.read_csv(file_path)
+    
+    # Check if 'state' column exists
+    if 'state' not in traffic_data.columns:
+        print("Missing 'state' column in the dataset.")
+        return None
+    
+    traffic_data['subject_age'] = traffic_data['subject_age'].fillna('Unknown')
+    traffic_data['subject_race'] = traffic_data['subject_race'].fillna('Unknown')
+    traffic_data['subject_sex'] = traffic_data['subject_sex'].fillna('Unknown')
 
-    for file in glob.glob(os.path.join(folder_path, "*.csv")):
-        print(file)
-        # Extract the state abbreviation from the filename and convert it to uppercase
-        state_abbr = os.path.basename(file).split('_')[0].upper()  # Convert to uppercase
-        
-        # Convert the abbreviation to the full state name
-        state_name = state_abbr_to_name.get(state_abbr, None)
-        
-        if state_name:  # Only process if the state name is found in the mapping
-            # Load the CSV file and get the number of rows
-            state_data = pd.read_csv(file)
-            stop_count = len(state_data)
-            
-            # Print the state name and the first few rows of data for verification
-            print(f"State: {state_name}, Stop Count: {stop_count}")
-            print(state_data.head())  # Preview the first few rows of the file
-            
-            # Append to the all_data DataFrame
-            temp_data = pd.DataFrame([{'name': state_name, 'stop_count': stop_count}])
-            # Concatenate temp_data with all_data
-            all_data = pd.concat([all_data, temp_data], ignore_index=True)
-        else:
-            print(f"Warning: State abbreviation {state_abbr} not found in mapping.")
+    # Aggregate by state to get the total count of stops per state
+    grouped_data = traffic_data.groupby(['state', 'subject_age', 'subject_race', 'subject_sex'], as_index=False)['count'].sum()
 
-    # Display the combined DataFrame for verification
+    # Map state abbreviations to full names
+    grouped_data['state'] = grouped_data['state'].map(state_abbr_to_name)
 
-    print(all_data)
-    return all_data
+    # Now aggregate by state, summing the 'count' column to get the total count per state
+    aggregated_data = grouped_data.groupby('state', as_index=False)['count'].sum()
+    aggregated_data = aggregated_data.rename(columns={'count': 'stop_count'})
+
+    print("Aggregated Data by State:")
+
+    print(aggregated_data)
+    
+    return aggregated_data
 
 
 def merge_data(us_states, traffic_stops):
     # Merge the GeoDataFrame with the traffic stops data
+    print("Columns in us_states:", us_states.columns)
+    print("Columns in traffic_stops:", traffic_stops.columns)
+    traffic_stops = traffic_stops.rename(columns={'state': 'name'})
     us_map = us_states.merge(traffic_stops, on='name', how='left')
     return us_map
 
@@ -97,18 +97,48 @@ def plot_choropleth(us_map):
     ax.set_axis_off()  # Hide axes for a cleaner look
     plt.show()
 
+def interactive_map(shapefile_path, data_file_path, age, sex, race):
+    us_states = load_us_states(shapefile_path)
+    traffic_stops = load_traffic_stop_data(data_file_path, age=age, sex=sex, race=race)
+    print(traffic_stops)
+    us_map = merge_data(us_states, traffic_stops)
+    plot_choropleth(us_map)
+
 # Main Function to Execute All Steps
 def main():
     shapefile_path = '/Users/sarvy/Downloads/ne_110m_admin_1_states_provinces/ne_110m_admin_1_states_provinces.shp'  # Update with your shapefile path
-    folder_path = '/Users/sarvy/Desktop/policing_dataset'  # Update with the folder path containing CSV files
+    folder_path = '/Users/sarvy/Desktop/OpenPolicing/OpenPolicing/aggregated_data.csv'  # Update with the folder path containing CSV files
 
     # Load data
-    us_states = load_us_states(shapefile_path)
-    traffic_stops = load_traffic_stop_data(folder_path)
-    us_map = merge_data(us_states, traffic_stops)
+    age_dropdown = Dropdown(
+        options=['Unknown', '20-29', '30-39', '40-49', None], 
+        value=None, 
+        description='Age:'
+    )
+    sex_dropdown = Dropdown(
+        options=['Unknown', 'Male', 'Female', None], 
+        value=None, 
+        description='Sex:'
+    )
+    race_dropdown = Dropdown(
+        options=['Unknown', 'White', 'Black', 'Asian', 'Hispanic', None], 
+        value=None, 
+        description='Race:'
+    )
+    def f(x):
+        return x
+    
+    interact(f, x=10)
 
-    # Plot the choropleth map
-    plot_choropleth(us_map)
+    # Display the interactive map with dropdowns for age, sex, and race filters
+    interact(
+        interactive_map, 
+        shapefile_path=fixed(shapefile_path), 
+        data_file_path=fixed(folder_path),
+        age=age_dropdown, 
+        sex=sex_dropdown, 
+        race=race_dropdown
+    )
 
 # Run the main function
 if __name__ == "__main__":
